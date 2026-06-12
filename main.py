@@ -467,7 +467,7 @@ async def help_command(ctx):
     embed.add_field(name="!force_end", value="Zaustavlja trenutni event bez izvlačenja pobjednika.", inline=False)
     embed.add_field(name="!status", value="Pokazuje stanje eventa — koliko je ljudi ušlo i kada kreće sljedeći.", inline=False)
     embed.add_field(name="!set_time <start> <end>", value=f"Mijenja minute starta i kraja svaki sat.\nPrimjer: `!set_time 25 40`\nTrenutno: :{str(START_MINUTE).zfill(2)} → :{str(END_MINUTE).zfill(2)}", inline=False)
-    embed.add_field(name="!set_draw_time <minuta>", value=f"Mijenja minutu izvlačenja pobjednika.\nPrimjer: `!set_draw_time 35`\nMora biti između starta i kraja.\nTrenutno: :{str(DRAW_MINUTE).zfill(2)}", inline=False)
+    embed.add_field(name="!set_draw <minuta>", value=f"Mijenja minutu izvlačenja pobjednika.\nPrimjer: `!set_draw 35` (alias: `!set_draw_time`)\nMora biti između starta i kraja.\nTrenutno: :{str(DRAW_MINUTE).zfill(2)}", inline=False)
     embed.add_field(name="!set_slots <broj>", value=f"Mijenja max broj mjesta.\nPrimjer: `!set_slots 20`\nTrenutno: {MAX_SLOTS}", inline=False)
     embed.add_field(name="!set_channel #kanal", value="Mijenja kanal u koji bot šalje event.\nBez argumenta pokazuje trenutni kanal.", inline=False)
     embed.add_field(name="!kick_from_list @korisnik", value="Makni korisnika s liste dok je event aktivan.", inline=False)
@@ -514,16 +514,16 @@ async def set_time(ctx, start: int = None, end: int = None):
     )
 
 
-@bot.command(name="set_draw_time")
+@bot.command(name="set_draw_time", aliases=["set_draw"])
 @commands.has_permissions(administrator=True)
 async def set_draw_time(ctx, minute: int = None):
-    """Set the draw minute. Usage: !set_draw_time 35"""
+    """Set the draw minute. Usage: !set_draw_time 35 or !set_draw 35"""
     global DRAW_MINUTE
 
     if minute is None:
         await ctx.send(
             f"ℹ️ Trenutno izvlačenje je u :{str(DRAW_MINUTE).zfill(2)}.\n"
-            f"Korištenje: `!set_draw_time <minuta>` (npr. `!set_draw_time 35`)\n"
+            f"Korištenje: `!set_draw <minuta>` ili `!set_draw_time <minuta>` (npr. `!set_draw 35`)\n"
             f"Minuta mora biti između 0 i 59 i prije kraja (:{str(END_MINUTE).zfill(2)})."
         )
         return
