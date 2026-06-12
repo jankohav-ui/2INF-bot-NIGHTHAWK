@@ -12,6 +12,17 @@ import os
 TOKEN = os.environ.get('DISCORD_TOKEN', '')
 CHANNEL_ID = int(os.environ.get('CHANNEL_ID', '0'))
 
+# Discord user IDs that are never eligible to be selected as Ammo Car driver.
+# Users can still join the list — they just won't be picked in the draw.
+# Format: integer user IDs. Add more with !blacklist_user or hardcode them here.
+BLACKLIST_USERS = {
+    # lambo_rambo_
+    # murasxkii
+    # Replace the comments above with the actual integer user IDs, e.g.:
+    # 123456789012345678,
+    # 987654321098765432,
+}
+
 # Timezone (Croatia = Europe/Zagreb, or UTC)
 TIMEZONE = pytz.timezone('Europe/Zagreb')
 
@@ -215,10 +226,14 @@ async def event_scheduler():
         if len(current_participants) == 0:
             await channel.send("😢 **Nitko nije ušao na listu. Bolje sreće sljedeći sat!**")
         else:
-            winner_id = random.choice(current_participants)
-            winner = bot.get_user(winner_id)
-            winner_mention = winner.mention if winner else f"<@{winner_id}>"
-            await channel.send(f"🎲 **IZVLAČENJE!** Pobjednik je... {winner_mention} 🎉\n🚗💨 **Ammo car vozi {winner_mention}!** 🚗💨")
+            eligible = [uid for uid in current_participants if uid not in BLACKLIST_USERS]
+            if not eligible:
+                await channel.send("⚠️ **Nitko od prijavljenih nije prihvatljiv za izvlačenje.** Svi sudionici su na blacklisti.")
+            else:
+                winner_id = random.choice(eligible)
+                winner = bot.get_user(winner_id)
+                winner_mention = winner.mention if winner else f"<@{winner_id}>"
+                await channel.send(f"🎲 **IZVLAČENJE!** Pobjednik je... {winner_mention} 🎉\n🚗💨 **Ammo car vozi {winner_mention}!** 🚗💨")
 
         print(f"🎲 Draw done at {now.strftime('%H:%M')}")
 
@@ -270,9 +285,14 @@ async def force_start(ctx):
         if len(current_participants) == 0:
             await ctx.send("😢 No one joined. Event cancelled.")
         else:
-            winner_id = random.choice(current_participants)
-            winner = bot.get_user(winner_id)
-            await ctx.send(f"🎉 **WINNER:** {winner.mention} drives the Ammo Car! 🚛")
+            eligible = [uid for uid in current_participants if uid not in BLACKLIST_USERS]
+            if not eligible:
+                await ctx.send("⚠️ **No eligible participants** — all are on the blacklist.")
+            else:
+                winner_id = random.choice(eligible)
+                winner = bot.get_user(winner_id)
+                winner_mention = winner.mention if winner else f"<@{winner_id}>"
+                await ctx.send(f"🎉 **WINNER:** {winner_mention} drives the Ammo Car! 🚛")
         event_active = False
         current_participants = []
 
@@ -451,6 +471,69 @@ async def clear_priority_role(ctx):
     await ctx.send("✅ Priority rol uklonjen. Svi su ravnopravni.")
 
 
+@bot.command(name="blacklist_user")
+@commands.has_permissions(administrator=True)
+async def blacklist_user(ctx, member: discord.Member = None):
+    """Dodaj korisnika na blacklistu (neće biti biran za Ammo Car). Usage: !blacklist_user @korisnik"""
+    global BLACKLIST_USERS
+
+    if member is None:
+        await ctx.send("❌ Navedi korisnika. Primjer: `!blacklist_user @korisnik`")
+        return
+
+    if member.id in BLACKLIST_USERS:
+        await ctx.send(f"⚠️ **{member.display_name}** već je na blacklisti.")
+        return
+
+    BLACKLIST_USERS.add(member.id)
+    await ctx.send(
+        f"🚫 **{member.display_name}** dodan/a na blacklistu.\n"
+        f"Može se prijaviti na listu, ali neće biti biran/a za Ammo Car."
+    )
+
+
+@bot.command(name="unblacklist_user")
+@commands.has_permissions(administrator=True)
+async def unblacklist_user(ctx, member: discord.Member = None):
+    """Ukloni korisnika s blackliste. Usage: !unblacklist_user @korisnik"""
+    global BLACKLIST_USERS
+
+    if member is None:
+        await ctx.send("❌ Navedi korisnika. Primjer: `!unblacklist_user @korisnik`")
+        return
+
+    if member.id not in BLACKLIST_USERS:
+        await ctx.send(f"⚠️ **{member.display_name}** nije na blacklisti.")
+        return
+
+    BLACKLIST_USERS.discard(member.id)
+    await ctx.send(f"✅ **{member.display_name}** uklonjen/a s blackliste. Može biti biran/a za Ammo Car.")
+
+
+@bot.command(name="blacklist_list")
+@commands.has_permissions(administrator=True)
+async def blacklist_list(ctx):
+    """Prikaži sve korisnike na blacklisti."""
+    if not BLACKLIST_USERS:
+        await ctx.send("✅ Blacklista je prazna — svi sudionici su prihvatljivi za izvlačenje.")
+        return
+
+    guild = ctx.guild
+    lines = []
+    for uid in BLACKLIST_USERS:
+        member = guild.get_member(uid) if guild else None
+        name = member.display_name if member else f"<@{uid}> *(nije na serveru)*"
+        lines.append(f"• {name} (`{uid}`)")
+
+    embed = discord.Embed(
+        title="🚫 Blacklista — Ammo Car",
+        description="\n".join(lines),
+        color=0xAA0000
+    )
+    embed.set_footer(text=f"{len(BLACKLIST_USERS)} korisnik(a) na blacklisti.")
+    await ctx.send(embed=embed, ephemeral=True)
+
+
 @bot.command(name="helpinf")
 @commands.has_permissions(administrator=True)
 async def help_command(ctx):
@@ -473,6 +556,10 @@ async def help_command(ctx):
     embed.add_field(name="!kick_from_list @korisnik", value="Makni korisnika s liste dok je event aktivan.", inline=False)
     embed.add_field(name="!set_priority_role @Rol", value=f"Postavlja rol koji ima prednost — izbacuje zadnjeg bez njega kad je lista puna.\nTrenutno: **{priority_status}**", inline=False)
     embed.add_field(name="!clear_priority_role", value="Uklanja priority rol.", inline=False)
+    embed.add_field(name="\u200b", value="**🚫 Blacklista**", inline=False)
+    embed.add_field(name="!blacklist_user @korisnik", value="Dodaj korisnika na blacklistu — može se prijaviti, ali neće biti biran/a za Ammo Car.", inline=False)
+    embed.add_field(name="!unblacklist_user @korisnik", value="Ukloni korisnika s blackliste.", inline=False)
+    embed.add_field(name="!blacklist_list", value="Prikaži sve korisnike koji su trenutno na blacklisti.", inline=False)
     embed.set_footer(text="Sve komande su admin only.")
     await ctx.send(embed=embed, ephemeral=True)
 
