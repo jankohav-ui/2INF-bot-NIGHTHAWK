@@ -467,6 +467,7 @@ async def help_command(ctx):
     embed.add_field(name="!force_end", value="Zaustavlja trenutni event bez izvlačenja pobjednika.", inline=False)
     embed.add_field(name="!status", value="Pokazuje stanje eventa — koliko je ljudi ušlo i kada kreće sljedeći.", inline=False)
     embed.add_field(name="!set_time <start> <end>", value=f"Mijenja minute starta i kraja svaki sat.\nPrimjer: `!set_time 25 40`\nTrenutno: :{str(START_MINUTE).zfill(2)} → :{str(END_MINUTE).zfill(2)}", inline=False)
+    embed.add_field(name="!set_draw_time <minuta>", value=f"Mijenja minutu izvlačenja pobjednika.\nPrimjer: `!set_draw_time 35`\nMora biti između starta i kraja.\nTrenutno: :{str(DRAW_MINUTE).zfill(2)}", inline=False)
     embed.add_field(name="!set_slots <broj>", value=f"Mijenja max broj mjesta.\nPrimjer: `!set_slots 20`\nTrenutno: {MAX_SLOTS}", inline=False)
     embed.add_field(name="!set_channel #kanal", value="Mijenja kanal u koji bot šalje event.\nBez argumenta pokazuje trenutni kanal.", inline=False)
     embed.add_field(name="!kick_from_list @korisnik", value="Makni korisnika s liste dok je event aktivan.", inline=False)
@@ -513,6 +514,44 @@ async def set_time(ctx, start: int = None, end: int = None):
     )
 
 
+@bot.command(name="set_draw_time")
+@commands.has_permissions(administrator=True)
+async def set_draw_time(ctx, minute: int = None):
+    """Set the draw minute. Usage: !set_draw_time 35"""
+    global DRAW_MINUTE
+
+    if minute is None:
+        await ctx.send(
+            f"ℹ️ Trenutno izvlačenje je u :{str(DRAW_MINUTE).zfill(2)}.\n"
+            f"Korištenje: `!set_draw_time <minuta>` (npr. `!set_draw_time 35`)\n"
+            f"Minuta mora biti između 0 i 59 i prije kraja (:{str(END_MINUTE).zfill(2)})."
+        )
+        return
+
+    if not (0 <= minute <= 59):
+        await ctx.send("❌ Minuta mora biti između 0 i 59.")
+        return
+
+    if minute >= END_MINUTE:
+        await ctx.send(f"❌ Minuta izvlačenja mora biti prije kraja (:{str(END_MINUTE).zfill(2)}). Odaberi manju minutu.")
+        return
+
+    if minute <= START_MINUTE:
+        await ctx.send(f"❌ Minuta izvlačenja mora biti nakon starta (:{str(START_MINUTE).zfill(2)}). Odaberi veću minutu.")
+        return
+
+    if event_active:
+        await ctx.send("⚠️ Ne možeš mijenjati vrijeme izvlačenja dok event traje. Koristi `!force_end` prvo.")
+        return
+
+    old = DRAW_MINUTE
+    DRAW_MINUTE = minute
+    await ctx.send(
+        f"✅ Minuta izvlačenja updateana: :{str(old).zfill(2)} → :{str(DRAW_MINUTE).zfill(2)}\n"
+        f"Raspored: start :{str(START_MINUTE).zfill(2)} → izvlačenje :{str(DRAW_MINUTE).zfill(2)} → kraj :{str(END_MINUTE).zfill(2)}"
+    )
+
+
 @bot.command(name="status")
 @commands.has_permissions(administrator=True)
 async def status(ctx):
@@ -528,7 +567,8 @@ async def status(ctx):
         )
         color = 0x888888
     else:
-        mins_until_lock = (40 - minute) % 60
+        mins_until_lock = (END_MINUTE - minute) % 60
+        mins_until_draw = (DRAW_MINUTE - minute) % 60
         lock_status = "🔒 Locked" if join_button_locked else f"🔓 Open — closes in **{mins_until_lock} min**"
 
         if current_participants:
@@ -541,9 +581,11 @@ async def status(ctx):
         else:
             participant_list = "*No one yet*"
 
+        draw_info = f"Draw at :{str(DRAW_MINUTE).zfill(2)} (in **{mins_until_draw} min**)" if not join_button_locked else f"Draw already done (:{str(DRAW_MINUTE).zfill(2)})"
         desc = (
             f"**🚛 Event is ACTIVE**\n"
             f"**Join window:** {lock_status}\n"
+            f"**🎲 Draw:** {draw_info}\n"
             f"**Participants:** {len(current_participants)}/{MAX_SLOTS}\n\n"
             f"{participant_list}"
         )
