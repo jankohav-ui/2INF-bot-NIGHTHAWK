@@ -185,6 +185,23 @@ async def update_message():
         await current_event_message.edit(embed=embed, view=view)
 
 
+async def private_reply(ctx, content=None, embed=None):
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.NotFound):
+        pass
+    try:
+        if embed:
+            await ctx.author.send(embed=embed)
+        else:
+            await ctx.author.send(content)
+    except discord.Forbidden:
+        if embed:
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(content)
+
+
 # ==========================================
 # SCHEDULER: RUNS EVERY MINUTE
 # ==========================================
@@ -266,34 +283,39 @@ async def force_start(ctx):
     global event_active, join_button_locked, current_participants, current_event_message
 
     if event_active:
-        await ctx.send("⚠️ Event already running! Wait for it to finish.")
+        await private_reply(ctx, "⚠️ Event already running! Wait for it to finish.")
         return
 
     event_active = True
     join_button_locked = False
     current_participants = []
 
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.NotFound):
+        pass
+
     embed = build_embed()
     view = JoinButtonView()
-    msg = await ctx.send(embed=embed, view=view)
+    msg = await ctx.channel.send(embed=embed, view=view)
     current_event_message = msg
-    await ctx.send(f"@everyone 🚨 **Inf lista je pocela imate do :{str(END_MINUTE).zfill(2)} da udete i pobjednik vozi ammo!**")
+    await ctx.channel.send(f"@everyone 🚨 **Inf lista je pocela imate do :{str(END_MINUTE).zfill(2)} da udete i pobjednik vozi ammo!**")
 
     await asyncio.sleep(900)
     if event_active:
         join_button_locked = True
         await update_message()
         if len(current_participants) == 0:
-            await ctx.send("😢 No one joined. Event cancelled.")
+            await ctx.channel.send("😢 No one joined. Event cancelled.")
         else:
             eligible = [uid for uid in current_participants if uid not in BLACKLIST_USERS]
             if not eligible:
-                await ctx.send("⚠️ **No eligible participants** — all are on the blacklist.")
+                await ctx.channel.send("⚠️ **No eligible participants** — all are on the blacklist.")
             else:
                 winner_id = random.choice(eligible)
                 winner = bot.get_user(winner_id)
                 winner_mention = winner.mention if winner else f"<@{winner_id}>"
-                await ctx.send(f"🎉 **WINNER:** {winner_mention} drives the Ammo Car! 🚛")
+                await ctx.channel.send(f"🎉 **WINNER:** {winner_mention} drives the Ammo Car! 🚛")
         event_active = False
         current_participants = []
 
@@ -303,7 +325,7 @@ async def force_start(ctx):
 async def force_end(ctx):
     global event_active, current_participants, current_event_message
     if not event_active:
-        await ctx.send("No active event.")
+        await private_reply(ctx, "❌ Nema aktivnog eventa.")
         return
     event_active = False
     current_participants = []
@@ -313,75 +335,72 @@ async def force_end(ctx):
             child.disabled = True
         await current_event_message.edit(view=old_view)
         current_event_message = None
-    await ctx.send("⏹️ Event force-stopped.")
+    await private_reply(ctx, "⏹️ Event force-stopped.")
 
 
 @bot.command(name="ping")
 async def ping(ctx):
-    """Provjeri latenciju bota. Usage: !ping"""
     latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! Latencija: **{latency}ms**")
+    await private_reply(ctx, f"🏓 Pong! Latencija: **{latency}ms**")
 
 
 @bot.command(name="remind")
 @commands.has_permissions(administrator=True)
 async def remind(ctx):
-    """Ručno šalje podsjetnik da event uskoro počinje. Usage: !remind"""
     channel = bot.get_channel(CHANNEL_ID)
     if not channel:
-        await ctx.send("❌ Event kanal nije pronađen.")
+        await private_reply(ctx, "❌ Event kanal nije pronađen.")
         return
     await channel.send(f"⏳ **INF lista počinje za malo — :{str(START_MINUTE).zfill(2)}! Budite spremni! 🚛**")
-    if channel != ctx.channel:
-        await ctx.send("✅ Podsjetnik poslan.")
+    await private_reply(ctx, "✅ Podsjetnik poslan.")
 
 
 @bot.command(name="reroll")
 @commands.has_permissions(administrator=True)
 async def reroll(ctx):
-    """Bira novog pobjednika bez mijenjanja liste. Usage: !reroll"""
     if len(current_participants) == 0:
-        await ctx.send("😢 **Lista je prazna. Nema koga birati!**")
+        await private_reply(ctx, "😢 **Lista je prazna. Nema koga birati!**")
         return
 
     eligible = [uid for uid in current_participants if uid not in BLACKLIST_USERS]
     if not eligible:
-        await ctx.send("⚠️ **Nitko nije prihvatljiv za reroll.** Svi su na blacklisti.")
+        await private_reply(ctx, "⚠️ **Nitko nije prihvatljiv za reroll.** Svi su na blacklisti.")
         return
 
     winner_id = random.choice(eligible)
     winner = bot.get_user(winner_id)
     winner_mention = winner.mention if winner else f"<@{winner_id}>"
     channel = bot.get_channel(CHANNEL_ID)
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.NotFound):
+        pass
     if channel:
         await channel.send(f"🔁 **REROLL!** Novi vozač Ammo Cara je... {winner_mention} 🎉🚗💨")
-    if channel and channel != ctx.channel:
-        await ctx.send(f"✅ Reroll gotov! Novi pobjednik: {winner_mention}")
 
 
 @bot.command(name="add")
 async def add_to_list(ctx, member: discord.Member = None):
-    """Dodaj korisnika na listu. Usage: !add @korisnik"""
     global current_participants, join_button_locked
 
     if not event_active:
-        await ctx.send("❌ Nema aktivnog eventa.")
+        await private_reply(ctx, "❌ Nema aktivnog eventa.")
         return
 
     if join_button_locked:
-        await ctx.send("🔒 Lista je zaključana.")
+        await private_reply(ctx, "🔒 Lista je zaključana.")
         return
 
     if member is None:
-        await ctx.send("❌ Navedi korisnika. Primjer: `!add @korisnik`")
+        await private_reply(ctx, "❌ Navedi korisnika. Primjer: `!add @korisnik`")
         return
 
     if member.id in BAN_USERS:
-        await ctx.send(f"🚫 **{member.display_name}** je baniran/a i ne može ući na listu.")
+        await private_reply(ctx, f"🚫 **{member.display_name}** je baniran/a i ne može ući na listu.")
         return
 
     if member.id in current_participants:
-        await ctx.send(f"⚠️ **{member.display_name}** već je na listi.")
+        await private_reply(ctx, f"⚠️ **{member.display_name}** već je na listi.")
         return
 
     guild = ctx.guild
@@ -398,93 +417,89 @@ async def add_to_list(ctx, member: discord.Member = None):
                     break
 
             if bumped_uid is None:
-                await ctx.send("❌ Lista je puna i svi imaju priority rol. Nema mjesta.")
+                await private_reply(ctx, "❌ Lista je puna i svi imaju priority rol. Nema mjesta.")
                 return
 
             current_participants.remove(bumped_uid)
             current_participants.append(member.id)
             bumped_member = guild.get_member(bumped_uid) if guild else None
             bumped_name = bumped_member.display_name if bumped_member else f"<@{bumped_uid}>"
-            await ctx.send(f"⭐ **{member.display_name}** dodan priority rolom! **{bumped_name}** je izbačen/a.")
+            await private_reply(ctx, f"⭐ **{member.display_name}** dodan priority rolom! **{bumped_name}** je izbačen/a.")
             await update_message()
         else:
-            await ctx.send(f"❌ Lista je puna ({MAX_SLOTS}/{MAX_SLOTS}).")
+            await private_reply(ctx, f"❌ Lista je puna ({MAX_SLOTS}/{MAX_SLOTS}).")
         return
 
     current_participants.append(member.id)
     prefix = "⭐ " if has_priority else ""
-    await ctx.send(f"✅ **{prefix}{member.display_name}** dodan/a na listu! ({len(current_participants)}/{MAX_SLOTS})")
+    await private_reply(ctx, f"✅ **{prefix}{member.display_name}** dodan/a na listu! ({len(current_participants)}/{MAX_SLOTS})")
     await update_message()
 
 
 @bot.command(name="kick_from_list")
 @commands.has_permissions(administrator=True)
 async def kick_from_list(ctx, member: discord.Member = None):
-    """Makni korisnika s liste. Usage: !kick_from_list @korisnik"""
     if not event_active:
-        await ctx.send("❌ Nema aktivnog eventa.")
+        await private_reply(ctx, "❌ Nema aktivnog eventa.")
         return
 
     if member is None:
-        await ctx.send("❌ Navedi korisnika. Primjer: `!kick_from_list @korisnik`")
+        await private_reply(ctx, "❌ Navedi korisnika. Primjer: `!kick_from_list @korisnik`")
         return
 
     if member.id not in current_participants:
-        await ctx.send(f"⚠️ **{member.display_name}** nije na listi.")
+        await private_reply(ctx, f"⚠️ **{member.display_name}** nije na listi.")
         return
 
     current_participants.remove(member.id)
-    await ctx.send(f"✅ **{member.display_name}** je maknut/a s liste.")
+    await private_reply(ctx, f"✅ **{member.display_name}** je maknut/a s liste.")
     await update_message()
 
 
 @bot.command(name="ban")
 @commands.has_permissions(administrator=True)
 async def ban_user(ctx, member: discord.Member = None):
-    """Zabranjuje korisniku ulaz na listu. Usage: !ban @korisnik"""
     global BAN_USERS
 
     if member is None:
-        await ctx.send("❌ Navedi korisnika. Primjer: `!ban @korisnik`")
+        await private_reply(ctx, "❌ Navedi korisnika. Primjer: `!ban @korisnik`")
         return
 
     if member.id in BAN_USERS:
-        await ctx.send(f"⚠️ **{member.display_name}** već je baniran/a.")
+        await private_reply(ctx, f"⚠️ **{member.display_name}** već je baniran/a.")
         return
 
     BAN_USERS.add(member.id)
     if member.id in current_participants:
         current_participants.remove(member.id)
         await update_message()
-        await ctx.send(f"🔨 **{member.display_name}** je baniran/a i maknut/a s liste.")
+        await private_reply(ctx, f"🔨 **{member.display_name}** je baniran/a i maknut/a s liste.")
     else:
-        await ctx.send(f"🔨 **{member.display_name}** je baniran/a — ne može ući na listu.")
+        await private_reply(ctx, f"🔨 **{member.display_name}** je baniran/a — ne može ući na listu.")
 
 
 @bot.command(name="unban")
 @commands.has_permissions(administrator=True)
 async def unban_user(ctx, member: discord.Member = None):
-    """Uklanja ban. Usage: !unban @korisnik"""
     global BAN_USERS
 
     if member is None:
-        await ctx.send("❌ Navedi korisnika. Primjer: `!unban @korisnik`")
+        await private_reply(ctx, "❌ Navedi korisnika. Primjer: `!unban @korisnik`")
         return
 
     if member.id not in BAN_USERS:
-        await ctx.send(f"⚠️ **{member.display_name}** nije baniran/a.")
+        await private_reply(ctx, f"⚠️ **{member.display_name}** nije baniran/a.")
         return
 
     BAN_USERS.discard(member.id)
-    await ctx.send(f"✅ **{member.display_name}** je unbaniran/a — može ponovo ući na listu.")
+    await private_reply(ctx, f"✅ **{member.display_name}** je unbaniran/a — može ponovo ući na listu.")
 
 
 @bot.command(name="banlist")
 @commands.has_permissions(administrator=True)
 async def banlist(ctx):
-    """Prikaži sve banirane korisnike."""
     if not BAN_USERS:
-        await ctx.send("✅ Nema banirani korisnika.")
+        await private_reply(ctx, "✅ Nema banirani korisnika.")
         return
 
     guild = ctx.guild
@@ -500,59 +515,56 @@ async def banlist(ctx):
         color=0x880000
     )
     embed.set_footer(text=f"{len(BAN_USERS)} korisnik(a) je baniran/a.")
-    await ctx.send(embed=embed)
+    await private_reply(ctx, embed=embed)
 
 
 @bot.command(name="set_channel")
 @commands.has_permissions(administrator=True)
 async def set_channel(ctx, channel: discord.TextChannel = None):
-    """Change the event target channel. Usage: !set_channel #channel-name"""
     global CHANNEL_ID
 
     if channel is None:
         current = bot.get_channel(CHANNEL_ID)
         current_mention = current.mention if current else f"`{CHANNEL_ID}` *(not found)*"
-        await ctx.send(f"ℹ️ Current event channel: {current_mention}\nUsage: `!set_channel #channel-name`")
+        await private_reply(ctx, f"ℹ️ Current event channel: {current_mention}\nUsage: `!set_channel #channel-name`")
         return
 
     if event_active:
-        await ctx.send("⚠️ Can't change channel while an event is running. Use `!force_end` first.")
+        await private_reply(ctx, "⚠️ Can't change channel while an event is running. Use `!force_end` first.")
         return
 
     old_id = CHANNEL_ID
     CHANNEL_ID = channel.id
     old_channel = bot.get_channel(old_id)
     old_mention = old_channel.mention if old_channel else f"`{old_id}`"
-    await ctx.send(f"✅ Event channel updated: {old_mention} → {channel.mention}\n⚠️ **Note:** This change is temporary and will reset on bot restart. Update `CHANNEL_ID` in your Replit secrets to make it permanent.")
+    await private_reply(ctx, f"✅ Event channel updated: {old_mention} → {channel.mention}\n⚠️ **Note:** This change is temporary and will reset on bot restart. Update `CHANNEL_ID` in your Replit secrets to make it permanent.")
 
 
 @bot.command(name="set_slots")
 @commands.has_permissions(administrator=True)
 async def set_slots(ctx, number: int = None):
-    """Change the max number of participants. Usage: !set_slots 20"""
     global MAX_SLOTS
 
     if number is None:
-        await ctx.send(f"ℹ️ Current max slots: **{MAX_SLOTS}**\nUsage: `!set_slots <number>` (e.g. `!set_slots 20`)")
+        await private_reply(ctx, f"ℹ️ Current max slots: **{MAX_SLOTS}**\nUsage: `!set_slots <number>` (e.g. `!set_slots 20`)")
         return
 
     if number < 1 or number > 100:
-        await ctx.send("❌ Number must be between 1 and 100.")
+        await private_reply(ctx, "❌ Number must be between 1 and 100.")
         return
 
     if event_active:
-        await ctx.send("⚠️ Can't change slots while an event is running. Use `!force_end` first.")
+        await private_reply(ctx, "⚠️ Can't change slots while an event is running. Use `!force_end` first.")
         return
 
     old = MAX_SLOTS
     MAX_SLOTS = number
-    await ctx.send(f"✅ Max slots updated: **{old}** → **{MAX_SLOTS}**")
+    await private_reply(ctx, f"✅ Max slots updated: **{old}** → **{MAX_SLOTS}**")
 
 
 @bot.command(name="set_priority_role")
 @commands.has_permissions(administrator=True)
 async def set_priority_role(ctx, role: discord.Role = None):
-    """Postavlja priority rol. Usage: !set_priority_role @Rol"""
     global PRIORITY_ROLE_ID
 
     if role is None:
@@ -560,13 +572,13 @@ async def set_priority_role(ctx, role: discord.Role = None):
             guild = ctx.guild
             r = guild.get_role(PRIORITY_ROLE_ID)
             mention = r.mention if r else f"`{PRIORITY_ROLE_ID}` *(nije pronađen)*"
-            await ctx.send(f"ℹ️ Trenutni priority rol: {mention}\nKorištenje: `!set_priority_role @Rol`")
+            await private_reply(ctx, f"ℹ️ Trenutni priority rol: {mention}\nKorištenje: `!set_priority_role @Rol`")
         else:
-            await ctx.send("ℹ️ Priority rol nije postavljen.\nKorištenje: `!set_priority_role @Rol`")
+            await private_reply(ctx, "ℹ️ Priority rol nije postavljen.\nKorištenje: `!set_priority_role @Rol`")
         return
 
     PRIORITY_ROLE_ID = role.id
-    await ctx.send(
+    await private_reply(ctx,
         f"✅ Priority rol postavljen na **{role.name}**!\n"
         f"Kad je lista puna, korisnici s ovim rolom izbacuju zadnjeg bez njega. ⭐"
     )
@@ -575,31 +587,29 @@ async def set_priority_role(ctx, role: discord.Role = None):
 @bot.command(name="clear_priority_role")
 @commands.has_permissions(administrator=True)
 async def clear_priority_role(ctx):
-    """Uklanja priority rol."""
     global PRIORITY_ROLE_ID
     if not PRIORITY_ROLE_ID:
-        await ctx.send("ℹ️ Priority rol već nije postavljen.")
+        await private_reply(ctx, "ℹ️ Priority rol već nije postavljen.")
         return
     PRIORITY_ROLE_ID = None
-    await ctx.send("✅ Priority rol uklonjen. Svi su ravnopravni.")
+    await private_reply(ctx, "✅ Priority rol uklonjen. Svi su ravnopravni.")
 
 
 @bot.command(name="blacklist_user")
 @commands.has_permissions(administrator=True)
 async def blacklist_user(ctx, member: discord.Member = None):
-    """Dodaj korisnika na blacklistu (neće biti biran za Ammo Car). Usage: !blacklist_user @korisnik"""
     global BLACKLIST_USERS
 
     if member is None:
-        await ctx.send("❌ Navedi korisnika. Primjer: `!blacklist_user @korisnik`")
+        await private_reply(ctx, "❌ Navedi korisnika. Primjer: `!blacklist_user @korisnik`")
         return
 
     if member.id in BLACKLIST_USERS:
-        await ctx.send(f"⚠️ **{member.display_name}** već je na blacklisti.")
+        await private_reply(ctx, f"⚠️ **{member.display_name}** već je na blacklisti.")
         return
 
     BLACKLIST_USERS.add(member.id)
-    await ctx.send(
+    await private_reply(ctx,
         f"🚫 **{member.display_name}** dodan/a na blacklistu.\n"
         f"Može se prijaviti na listu, ali neće biti biran/a za Ammo Car."
     )
@@ -608,27 +618,25 @@ async def blacklist_user(ctx, member: discord.Member = None):
 @bot.command(name="unblacklist_user")
 @commands.has_permissions(administrator=True)
 async def unblacklist_user(ctx, member: discord.Member = None):
-    """Ukloni korisnika s blackliste. Usage: !unblacklist_user @korisnik"""
     global BLACKLIST_USERS
 
     if member is None:
-        await ctx.send("❌ Navedi korisnika. Primjer: `!unblacklist_user @korisnik`")
+        await private_reply(ctx, "❌ Navedi korisnika. Primjer: `!unblacklist_user @korisnik`")
         return
 
     if member.id not in BLACKLIST_USERS:
-        await ctx.send(f"⚠️ **{member.display_name}** nije na blacklisti.")
+        await private_reply(ctx, f"⚠️ **{member.display_name}** nije na blacklisti.")
         return
 
     BLACKLIST_USERS.discard(member.id)
-    await ctx.send(f"✅ **{member.display_name}** uklonjen/a s blackliste. Može biti biran/a za Ammo Car.")
+    await private_reply(ctx, f"✅ **{member.display_name}** uklonjen/a s blackliste. Može biti biran/a za Ammo Car.")
 
 
 @bot.command(name="blacklist_list")
 @commands.has_permissions(administrator=True)
 async def blacklist_list(ctx):
-    """Prikaži sve korisnike na blacklisti."""
     if not BLACKLIST_USERS:
-        await ctx.send("✅ Blacklista je prazna — svi sudionici su prihvatljivi za izvlačenje.")
+        await private_reply(ctx, "✅ Blacklista je prazna — svi sudionici su prihvatljivi za izvlačenje.")
         return
 
     guild = ctx.guild
@@ -644,7 +652,7 @@ async def blacklist_list(ctx):
         color=0xAA0000
     )
     embed.set_footer(text=f"{len(BLACKLIST_USERS)} korisnik(a) na blacklisti.")
-    await ctx.send(embed=embed)
+    await private_reply(ctx, embed=embed)
 
 
 @bot.command(name="helpinf")
@@ -676,22 +684,17 @@ async def help_command(ctx):
     embed.add_field(name="!kick_from_list @korisnik", value="Makni korisnika s liste dok je event aktivan.", inline=False)
     embed.add_field(name="!set_priority_role @Rol", value=f"Postavlja rol koji ima prednost — izbacuje zadnjeg bez njega kad je lista puna.\nTrenutno: **{priority_status}**", inline=False)
     embed.add_field(name="!clear_priority_role", value="Uklanja priority rol.", inline=False)
-    embed.set_footer(text="Sve komande su admin only.")
-    try:
-        await ctx.author.send(embed=embed)
-        await ctx.message.delete()
-    except discord.Forbidden:
-        await ctx.send(embed=embed)
+    embed.set_footer(text="Sve komande su admin only. Odgovori su vidljivi samo tebi.")
+    await private_reply(ctx, embed=embed)
 
 
 @bot.command(name="set_time")
 @commands.has_permissions(administrator=True)
 async def set_time(ctx, start: int = None, end: int = None):
-    """Set start and end minutes. Usage: !set_time 25 40"""
     global START_MINUTE, END_MINUTE
 
     if start is None or end is None:
-        await ctx.send(
+        await private_reply(ctx,
             f"ℹ️ Trenutno: start :{str(START_MINUTE).zfill(2)} → end :{str(END_MINUTE).zfill(2)}\n"
             f"Korištenje: `!set_time <start> <end>` (npr. `!set_time 25 40`)\n"
             f"Oba broja moraju biti između 0 i 59."
@@ -699,21 +702,21 @@ async def set_time(ctx, start: int = None, end: int = None):
         return
 
     if not (0 <= start <= 59) or not (0 <= end <= 59):
-        await ctx.send("❌ Minuta mora biti između 0 i 59.")
+        await private_reply(ctx, "❌ Minuta mora biti između 0 i 59.")
         return
 
     if start == end:
-        await ctx.send("❌ Start i end ne mogu biti isti.")
+        await private_reply(ctx, "❌ Start i end ne mogu biti isti.")
         return
 
     if event_active:
-        await ctx.send("⚠️ Ne možeš mijenjati vrijeme dok event traje. Koristi `!force_end` prvo.")
+        await private_reply(ctx, "⚠️ Ne možeš mijenjati vrijeme dok event traje. Koristi `!force_end` prvo.")
         return
 
     old_start, old_end = START_MINUTE, END_MINUTE
     START_MINUTE = start
     END_MINUTE = end
-    await ctx.send(
+    await private_reply(ctx,
         f"✅ Vrijeme updateano!\n"
         f"**Start:** :{str(old_start).zfill(2)} → :{str(START_MINUTE).zfill(2)}\n"
         f"**End:** :{str(old_end).zfill(2)} → :{str(END_MINUTE).zfill(2)}\n"
@@ -724,11 +727,10 @@ async def set_time(ctx, start: int = None, end: int = None):
 @bot.command(name="set_draw_time", aliases=["set_draw"])
 @commands.has_permissions(administrator=True)
 async def set_draw_time(ctx, minute: int = None):
-    """Set the draw minute. Usage: !set_draw_time 35 or !set_draw 35"""
     global DRAW_MINUTE
 
     if minute is None:
-        await ctx.send(
+        await private_reply(ctx,
             f"ℹ️ Trenutno izvlačenje je u :{str(DRAW_MINUTE).zfill(2)}.\n"
             f"Korištenje: `!set_draw <minuta>` ili `!set_draw_time <minuta>` (npr. `!set_draw 35`)\n"
             f"Minuta mora biti između 0 i 59 i prije kraja (:{str(END_MINUTE).zfill(2)})."
@@ -736,24 +738,24 @@ async def set_draw_time(ctx, minute: int = None):
         return
 
     if not (0 <= minute <= 59):
-        await ctx.send("❌ Minuta mora biti između 0 i 59.")
+        await private_reply(ctx, "❌ Minuta mora biti između 0 i 59.")
         return
 
     if minute >= END_MINUTE:
-        await ctx.send(f"❌ Minuta izvlačenja mora biti prije kraja (:{str(END_MINUTE).zfill(2)}). Odaberi manju minutu.")
+        await private_reply(ctx, f"❌ Minuta izvlačenja mora biti prije kraja (:{str(END_MINUTE).zfill(2)}). Odaberi manju minutu.")
         return
 
     if minute <= START_MINUTE:
-        await ctx.send(f"❌ Minuta izvlačenja mora biti nakon starta (:{str(START_MINUTE).zfill(2)}). Odaberi veću minutu.")
+        await private_reply(ctx, f"❌ Minuta izvlačenja mora biti nakon starta (:{str(START_MINUTE).zfill(2)}). Odaberi veću minutu.")
         return
 
     if event_active:
-        await ctx.send("⚠️ Ne možeš mijenjati vrijeme izvlačenja dok event traje. Koristi `!force_end` prvo.")
+        await private_reply(ctx, "⚠️ Ne možeš mijenjati vrijeme izvlačenja dok event traje. Koristi `!force_end` prvo.")
         return
 
     old = DRAW_MINUTE
     DRAW_MINUTE = minute
-    await ctx.send(
+    await private_reply(ctx,
         f"✅ Minuta izvlačenja updateana: :{str(old).zfill(2)} → :{str(DRAW_MINUTE).zfill(2)}\n"
         f"Raspored: start :{str(START_MINUTE).zfill(2)} → izvlačenje :{str(DRAW_MINUTE).zfill(2)} → kraj :{str(END_MINUTE).zfill(2)}"
     )
@@ -800,7 +802,7 @@ async def status(ctx):
 
     embed = discord.Embed(title="📊 Ammo Car Event Status", description=desc, color=color)
     embed.set_footer(text=f"Checked at {now.strftime('%H:%M')} ({TIMEZONE})")
-    await ctx.send(embed=embed, ephemeral=False)
+    await private_reply(ctx, embed=embed)
 
 
 @bot.event
