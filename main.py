@@ -15,13 +15,11 @@ CHANNEL_ID = int(os.environ.get('CHANNEL_ID', '0'))
 # Discord user IDs that are never eligible to be selected as Ammo Car driver.
 # Users can still join the list — they just won't be picked in the draw.
 # Format: integer user IDs. Add more with !blacklist_user or hardcode them here.
-BLACKLIST_USERS = {
-    # lambo_rambo_
-    # murasxkii
-    # Replace the comments above with the actual integer user IDs, e.g.:
-    # 123456789012345678,
-    # 987654321098765432,
-}
+BLACKLIST_USERS = set()
+# To hardcode users, add their integer IDs:
+# BLACKLIST_USERS = {123456789012345678, 987654321098765432}
+
+BAN_USERS = set()
 
 # Timezone (Croatia = Europe/Zagreb, or UTC)
 TIMEZONE = pytz.timezone('Europe/Zagreb')
@@ -97,6 +95,10 @@ class JoinButtonView(discord.ui.View):
                 await interaction.response.send_message("🔒 Lista je zaključana!", ephemeral=True)
                 return
 
+            if interaction.user.id in BAN_USERS:
+                await interaction.response.send_message("🚫 Baniran/a si i ne možeš ući na listu.", ephemeral=True)
+                return
+
             if interaction.user.id in current_participants:
                 await interaction.response.send_message("⚠️ Već si na listi!", ephemeral=True)
                 return
@@ -136,7 +138,6 @@ class JoinButtonView(discord.ui.View):
             prefix = "⭐ " if has_priority else ""
             await interaction.response.send_message(f"✅ **{prefix}{nick}** na listi! ({len(current_participants)}/{MAX_SLOTS})", ephemeral=True)
             await update_message()
-
 
         except Exception as e:
             print(f"❌ Greška u join_callback: {e}")
@@ -224,7 +225,7 @@ async def event_scheduler():
         channel = bot.get_channel(CHANNEL_ID)
 
         if len(current_participants) == 0:
-            await channel.send("😢 **Nitko nije ušao na listu. Bolje sreće sljedeći sat!**")
+            await channel.send("😢 **Nitko nije na listi. Ajmo se aktivirat malo.**")
         else:
             eligible = [uid for uid in current_participants if uid not in BLACKLIST_USERS]
             if not eligible:
@@ -315,6 +316,49 @@ async def force_end(ctx):
     await ctx.send("⏹️ Event force-stopped.")
 
 
+@bot.command(name="ping")
+async def ping(ctx):
+    """Provjeri latenciju bota. Usage: !ping"""
+    latency = round(bot.latency * 1000)
+    await ctx.send(f"🏓 Pong! Latencija: **{latency}ms**")
+
+
+@bot.command(name="remind")
+@commands.has_permissions(administrator=True)
+async def remind(ctx):
+    """Ručno šalje podsjetnik da event uskoro počinje. Usage: !remind"""
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        await ctx.send("❌ Event kanal nije pronađen.")
+        return
+    await channel.send(f"⏳ **INF lista počinje za malo — :{str(START_MINUTE).zfill(2)}! Budite spremni! 🚛**")
+    if channel != ctx.channel:
+        await ctx.send("✅ Podsjetnik poslan.")
+
+
+@bot.command(name="reroll")
+@commands.has_permissions(administrator=True)
+async def reroll(ctx):
+    """Bira novog pobjednika bez mijenjanja liste. Usage: !reroll"""
+    if len(current_participants) == 0:
+        await ctx.send("😢 **Lista je prazna. Nema koga birati!**")
+        return
+
+    eligible = [uid for uid in current_participants if uid not in BLACKLIST_USERS]
+    if not eligible:
+        await ctx.send("⚠️ **Nitko nije prihvatljiv za reroll.** Svi su na blacklisti.")
+        return
+
+    winner_id = random.choice(eligible)
+    winner = bot.get_user(winner_id)
+    winner_mention = winner.mention if winner else f"<@{winner_id}>"
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send(f"🔁 **REROLL!** Novi vozač Ammo Cara je... {winner_mention} 🎉🚗💨")
+    if channel and channel != ctx.channel:
+        await ctx.send(f"✅ Reroll gotov! Novi pobjednik: {winner_mention}")
+
+
 @bot.command(name="add")
 async def add_to_list(ctx, member: discord.Member = None):
     """Dodaj korisnika na listu. Usage: !add @korisnik"""
@@ -330,6 +374,10 @@ async def add_to_list(ctx, member: discord.Member = None):
 
     if member is None:
         await ctx.send("❌ Navedi korisnika. Primjer: `!add @korisnik`")
+        return
+
+    if member.id in BAN_USERS:
+        await ctx.send(f"🚫 **{member.display_name}** je baniran/a i ne može ući na listu.")
         return
 
     if member.id in current_participants:
@@ -388,6 +436,71 @@ async def kick_from_list(ctx, member: discord.Member = None):
     current_participants.remove(member.id)
     await ctx.send(f"✅ **{member.display_name}** je maknut/a s liste.")
     await update_message()
+
+
+@bot.command(name="ban")
+@commands.has_permissions(administrator=True)
+async def ban_user(ctx, member: discord.Member = None):
+    """Zabranjuje korisniku ulaz na listu. Usage: !ban @korisnik"""
+    global BAN_USERS
+
+    if member is None:
+        await ctx.send("❌ Navedi korisnika. Primjer: `!ban @korisnik`")
+        return
+
+    if member.id in BAN_USERS:
+        await ctx.send(f"⚠️ **{member.display_name}** već je baniran/a.")
+        return
+
+    BAN_USERS.add(member.id)
+    if member.id in current_participants:
+        current_participants.remove(member.id)
+        await update_message()
+        await ctx.send(f"🔨 **{member.display_name}** je baniran/a i maknut/a s liste.")
+    else:
+        await ctx.send(f"🔨 **{member.display_name}** je baniran/a — ne može ući na listu.")
+
+
+@bot.command(name="unban")
+@commands.has_permissions(administrator=True)
+async def unban_user(ctx, member: discord.Member = None):
+    """Uklanja ban. Usage: !unban @korisnik"""
+    global BAN_USERS
+
+    if member is None:
+        await ctx.send("❌ Navedi korisnika. Primjer: `!unban @korisnik`")
+        return
+
+    if member.id not in BAN_USERS:
+        await ctx.send(f"⚠️ **{member.display_name}** nije baniran/a.")
+        return
+
+    BAN_USERS.discard(member.id)
+    await ctx.send(f"✅ **{member.display_name}** je unbaniran/a — može ponovo ući na listu.")
+
+
+@bot.command(name="banlist")
+@commands.has_permissions(administrator=True)
+async def banlist(ctx):
+    """Prikaži sve banirane korisnike."""
+    if not BAN_USERS:
+        await ctx.send("✅ Nema banirani korisnika.")
+        return
+
+    guild = ctx.guild
+    lines = []
+    for uid in BAN_USERS:
+        member = guild.get_member(uid) if guild else None
+        name = member.display_name if member else f"<@{uid}> *(nije na serveru)*"
+        lines.append(f"• {name} (`{uid}`)")
+
+    embed = discord.Embed(
+        title="🔨 Banirani korisnici",
+        description="\n".join(lines),
+        color=0x880000
+    )
+    embed.set_footer(text=f"{len(BAN_USERS)} korisnik(a) je baniran/a.")
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="set_channel")
@@ -531,7 +644,7 @@ async def blacklist_list(ctx):
         color=0xAA0000
     )
     embed.set_footer(text=f"{len(BLACKLIST_USERS)} korisnik(a) na blacklisti.")
-    await ctx.send(embed=embed, ephemeral=True)
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="helpinf")
@@ -548,20 +661,27 @@ async def help_command(ctx):
     )
     embed.add_field(name="!force_start", value="Ručno pokreće event odmah.", inline=False)
     embed.add_field(name="!force_end", value="Zaustavlja trenutni event bez izvlačenja pobjednika.", inline=False)
+    embed.add_field(name="!reroll", value="Bira novog pobjednika ako prvi ne može voziti — lista ostaje ista.", inline=False)
+    embed.add_field(name="!remind", value="Ručno šalje podsjetnik u event kanal da lista uskoro počinje.", inline=False)
+    embed.add_field(name="!ping", value="Provjeri radi li bot i kolika mu je latencija. *(svi mogu koristiti)*", inline=False)
     embed.add_field(name="!status", value="Pokazuje stanje eventa — koliko je ljudi ušlo i kada kreće sljedeći.", inline=False)
+    embed.add_field(name="!add @korisnik", value="Dodaj korisnika na listu dok je event aktivan. *(svi mogu koristiti)*", inline=False)
+    embed.add_field(name="!ban @korisnik", value="Zabranjuje korisniku ulaz na listu dok ga ne unbaniraš.", inline=False)
+    embed.add_field(name="!unban @korisnik", value="Uklanja ban — korisnik može ponovo ući na listu.", inline=False)
+    embed.add_field(name="!banlist", value="Prikaži sve trenutno banirane korisnike.", inline=False)
     embed.add_field(name="!set_time <start> <end>", value=f"Mijenja minute starta i kraja svaki sat.\nPrimjer: `!set_time 25 40`\nTrenutno: :{str(START_MINUTE).zfill(2)} → :{str(END_MINUTE).zfill(2)}", inline=False)
-    embed.add_field(name="!set_draw <minuta>", value=f"Mijenja minutu izvlačenja pobjednika.\nPrimjer: `!set_draw 35` (alias: `!set_draw_time`)\nMora biti između starta i kraja.\nTrenutno: :{str(DRAW_MINUTE).zfill(2)}", inline=False)
+    embed.add_field(name="!set_draw <minuta>", value=f"Mijenja minutu automatskog izvlačenja.\nPrimjer: `!set_draw 35`\nTrenutno: :{str(DRAW_MINUTE).zfill(2)}", inline=False)
     embed.add_field(name="!set_slots <broj>", value=f"Mijenja max broj mjesta.\nPrimjer: `!set_slots 20`\nTrenutno: {MAX_SLOTS}", inline=False)
     embed.add_field(name="!set_channel #kanal", value="Mijenja kanal u koji bot šalje event.\nBez argumenta pokazuje trenutni kanal.", inline=False)
     embed.add_field(name="!kick_from_list @korisnik", value="Makni korisnika s liste dok je event aktivan.", inline=False)
     embed.add_field(name="!set_priority_role @Rol", value=f"Postavlja rol koji ima prednost — izbacuje zadnjeg bez njega kad je lista puna.\nTrenutno: **{priority_status}**", inline=False)
     embed.add_field(name="!clear_priority_role", value="Uklanja priority rol.", inline=False)
-    embed.add_field(name="\u200b", value="**🚫 Blacklista**", inline=False)
-    embed.add_field(name="!blacklist_user @korisnik", value="Dodaj korisnika na blacklistu — može se prijaviti, ali neće biti biran/a za Ammo Car.", inline=False)
-    embed.add_field(name="!unblacklist_user @korisnik", value="Ukloni korisnika s blackliste.", inline=False)
-    embed.add_field(name="!blacklist_list", value="Prikaži sve korisnike koji su trenutno na blacklisti.", inline=False)
     embed.set_footer(text="Sve komande su admin only.")
-    await ctx.send(embed=embed, ephemeral=True)
+    try:
+        await ctx.author.send(embed=embed)
+        await ctx.message.delete()
+    except discord.Forbidden:
+        await ctx.send(embed=embed)
 
 
 @bot.command(name="set_time")
