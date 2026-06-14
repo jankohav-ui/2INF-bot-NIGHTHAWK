@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     'START_MINUTE': 25,
     'DRAW_MINUTE': 35,
     'END_MINUTE': 40,
+    'PRIORITY_ROLE_ID': None,
 }
 
 def load_settings():
@@ -41,16 +42,18 @@ def save_settings():
         'START_MINUTE': START_MINUTE,
         'DRAW_MINUTE': DRAW_MINUTE,
         'END_MINUTE': END_MINUTE,
+        'PRIORITY_ROLE_ID': PRIORITY_ROLE_ID,
     }
     with open(SETTINGS_FILE, 'w') as f:
         json.dump(data, f, indent=2)
 
 _s = load_settings()
-CHANNEL_ID    = _s['CHANNEL_ID']
-MAX_SLOTS     = _s['MAX_SLOTS']
-START_MINUTE  = _s['START_MINUTE']
-DRAW_MINUTE   = _s['DRAW_MINUTE']
-END_MINUTE    = _s['END_MINUTE']
+CHANNEL_ID       = _s['CHANNEL_ID']
+MAX_SLOTS        = _s['MAX_SLOTS']
+START_MINUTE     = _s['START_MINUTE']
+DRAW_MINUTE      = _s['DRAW_MINUTE']
+END_MINUTE       = _s['END_MINUTE']
+PRIORITY_ROLE_ID = _s['PRIORITY_ROLE_ID']
 
 BLACKLIST_USERS = set()
 BAN_USERS = set()
@@ -628,6 +631,7 @@ async def set_priority_role(ctx, role: discord.Role = None):
         return
 
     PRIORITY_ROLE_ID = role.id
+    save_settings()
     await private_reply(ctx,
         f"✅ Priority rol postavljen na **{role.name}**!\n"
         f"Kad je lista puna, korisnici s ovim rolom izbacuju zadnjeg bez njega. ⭐"
@@ -642,6 +646,7 @@ async def clear_priority_role(ctx):
         await private_reply(ctx, "ℹ️ Priority rol već nije postavljen.")
         return
     PRIORITY_ROLE_ID = None
+    save_settings()
     await private_reply(ctx, "✅ Priority rol uklonjen. Svi su ravnopravni.")
 
 
