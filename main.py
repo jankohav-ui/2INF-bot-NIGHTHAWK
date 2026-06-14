@@ -5,33 +5,65 @@ import random
 from datetime import datetime
 import pytz
 import os
+import json
 
 # ==========================================
-# CONFIGURATION — loaded from environment secrets
+# CONFIGURATION
 # ==========================================
 TOKEN = os.environ.get('DISCORD_TOKEN', '')
-CHANNEL_ID = int(os.environ.get('CHANNEL_ID', '0'))
 
-# Discord user IDs that are never eligible to be selected as Ammo Car driver.
-# Users can still join the list — they just won't be picked in the draw.
-# Format: integer user IDs. Add more with !blacklist_user or hardcode them here.
+SETTINGS_FILE = 'settings.json'
+DEFAULT_SETTINGS = {
+    'CHANNEL_ID': 0,
+    'MAX_SLOTS': 10,
+    'START_MINUTE': 25,
+    'DRAW_MINUTE': 35,
+    'END_MINUTE': 40,
+}
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                data = json.load(f)
+                for key, val in DEFAULT_SETTINGS.items():
+                    if key not in data:
+                        data[key] = val
+                return data
+        except Exception:
+            pass
+    return DEFAULT_SETTINGS.copy()
+
+def save_settings():
+    data = {
+        'CHANNEL_ID': CHANNEL_ID,
+        'MAX_SLOTS': MAX_SLOTS,
+        'START_MINUTE': START_MINUTE,
+        'DRAW_MINUTE': DRAW_MINUTE,
+        'END_MINUTE': END_MINUTE,
+    }
+    with open(SETTINGS_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+_s = load_settings()
+CHANNEL_ID    = _s['CHANNEL_ID']
+MAX_SLOTS     = _s['MAX_SLOTS']
+START_MINUTE  = _s['START_MINUTE']
+DRAW_MINUTE   = _s['DRAW_MINUTE']
+END_MINUTE    = _s['END_MINUTE']
+
 BLACKLIST_USERS = set()
-# To hardcode users, add their integer IDs:
-# BLACKLIST_USERS = {123456789012345678, 987654321098765432}
-
 BAN_USERS = set()
 
-# Timezone (Croatia = Europe/Zagreb, or UTC)
+# Timezone (Croatia = Europe/Zagreb)
 TIMEZONE = pytz.timezone('Europe/Zagreb')
 
 # ==========================================
 # INTERNAL STATE
 # ==========================================
-MAX_SLOTS = 10
-START_MINUTE = 25
-DRAW_MINUTE = 35
-END_MINUTE = 40
 PRIORITY_ROLE_ID = None
+last_winner_id = None
+winner_history = []
 current_participants = []
 event_active = False
 join_button_locked = False
@@ -212,6 +244,10 @@ async def event_scheduler():
     now = datetime.now(TIMEZONE)
     minute = now.minute
 
+    # Skip everything if channel not configured
+    if CHANNEL_ID == 0:
+        return
+
     # REMINDER 5 MINUTES BEFORE START
     reminder_minute = (START_MINUTE - 5) % 60
     if minute == reminder_minute and not event_active:
@@ -249,6 +285,10 @@ async def event_scheduler():
                 await channel.send("⚠️ **Nitko od prijavljenih nije prihvatljiv za izvlačenje.** Svi sudionici su na blacklisti.")
             else:
                 winner_id = random.choice(eligible)
+                last_winner_id = winner_id
+                winner_history.append({"id": winner_id, "time": datetime.now(TIMEZONE).strftime("%d.%m. %H:%M")})
+                if len(winner_history) > 5:
+                    winner_history.pop(0)
                 winner = bot.get_user(winner_id)
                 winner_mention = winner.mention if winner else f"<@{winner_id}>"
                 await channel.send(f"🎲 **IZVLAČENJE!** Pobjednik je... {winner_mention} 🎉\n🚗💨 **Ammo car vozi {winner_mention}!** 🚗💨")
@@ -313,6 +353,10 @@ async def force_start(ctx):
                 await ctx.channel.send("⚠️ **No eligible participants** — all are on the blacklist.")
             else:
                 winner_id = random.choice(eligible)
+                last_winner_id = winner_id
+                winner_history.append({"id": winner_id, "time": datetime.now(TIMEZONE).strftime("%d.%m. %H:%M")})
+                if len(winner_history) > 5:
+                    winner_history.pop(0)
                 winner = bot.get_user(winner_id)
                 winner_mention = winner.mention if winner else f"<@{winner_id}>"
                 await ctx.channel.send(f"🎉 **WINNER:** {winner_mention} drives the Ammo Car! 🚛")
@@ -368,6 +412,10 @@ async def reroll(ctx):
         return
 
     winner_id = random.choice(eligible)
+    last_winner_id = winner_id
+    winner_history.append({"id": winner_id, "time": datetime.now(TIMEZONE).strftime("%d.%m. %H:%M")})
+    if len(winner_history) > 5:
+        winner_history.pop(0)
     winner = bot.get_user(winner_id)
     winner_mention = winner.mention if winner else f"<@{winner_id}>"
     channel = bot.get_channel(CHANNEL_ID)
@@ -535,9 +583,10 @@ async def set_channel(ctx, channel: discord.TextChannel = None):
 
     old_id = CHANNEL_ID
     CHANNEL_ID = channel.id
+    save_settings()
     old_channel = bot.get_channel(old_id)
-    old_mention = old_channel.mention if old_channel else f"`{old_id}`"
-    await private_reply(ctx, f"✅ Event channel updated: {old_mention} → {channel.mention}\n⚠️ **Note:** This change is temporary and will reset on bot restart. Update `CHANNEL_ID` in your Replit secrets to make it permanent.")
+    old_mention = old_channel.mention if old_channel else f"*(nije bio postavljen)*"
+    await private_reply(ctx, f"✅ Event kanal postavljen: {old_mention} → {channel.mention}\n✅ Snimljeno trajno — ostaje i nakon restarta.")
 
 
 @bot.command(name="set_slots")
@@ -559,6 +608,7 @@ async def set_slots(ctx, number: int = None):
 
     old = MAX_SLOTS
     MAX_SLOTS = number
+    save_settings()
     await private_reply(ctx, f"✅ Max slots updated: **{old}** → **{MAX_SLOTS}**")
 
 
@@ -667,9 +717,13 @@ async def help_command(ctx):
         title="📋 Inf Lista — Admin Komande",
         color=0xFF5500
     )
+    embed.add_field(name="!setup", value="Prikazuje trenutnu konfiguraciju — kanal, vremena, slotovi.", inline=False)
     embed.add_field(name="!force_start", value="Ručno pokreće event odmah.", inline=False)
     embed.add_field(name="!force_end", value="Zaustavlja trenutni event bez izvlačenja pobjednika.", inline=False)
     embed.add_field(name="!reroll", value="Bira novog pobjednika ako prvi ne može voziti — lista ostaje ista.", inline=False)
+    embed.add_field(name="!winner", value="Ponovo objavljuje zadnjeg pobjednika u event kanalu.", inline=False)
+    embed.add_field(name="!clearwinner", value="Resetira zabilježenog pobjednika.", inline=False)
+    embed.add_field(name="!history", value="Prikazuje zadnjih 5 pobjednika s vremenima.", inline=False)
     embed.add_field(name="!remind", value="Ručno šalje podsjetnik u event kanal da lista uskoro počinje.", inline=False)
     embed.add_field(name="!ping", value="Provjeri radi li bot i kolika mu je latencija. *(svi mogu koristiti)*", inline=False)
     embed.add_field(name="!status", value="Pokazuje stanje eventa — koliko je ljudi ušlo i kada kreće sljedeći.", inline=False)
@@ -716,6 +770,7 @@ async def set_time(ctx, start: int = None, end: int = None):
     old_start, old_end = START_MINUTE, END_MINUTE
     START_MINUTE = start
     END_MINUTE = end
+    save_settings()
     await private_reply(ctx,
         f"✅ Vrijeme updateano!\n"
         f"**Start:** :{str(old_start).zfill(2)} → :{str(START_MINUTE).zfill(2)}\n"
@@ -755,10 +810,87 @@ async def set_draw_time(ctx, minute: int = None):
 
     old = DRAW_MINUTE
     DRAW_MINUTE = minute
+    save_settings()
     await private_reply(ctx,
         f"✅ Minuta izvlačenja updateana: :{str(old).zfill(2)} → :{str(DRAW_MINUTE).zfill(2)}\n"
         f"Raspored: start :{str(START_MINUTE).zfill(2)} → izvlačenje :{str(DRAW_MINUTE).zfill(2)} → kraj :{str(END_MINUTE).zfill(2)}"
     )
+
+
+@bot.command(name="winner")
+@commands.has_permissions(administrator=True)
+async def winner_cmd(ctx):
+    """Ponovo objavljuje zadnjeg pobjednika u event kanalu."""
+    if last_winner_id is None:
+        await private_reply(ctx, "❌ Nema zabilježenog pobjednika od kad je bot pokrenut.")
+        return
+    winner = bot.get_user(last_winner_id)
+    winner_mention = winner.mention if winner else f"<@{last_winner_id}>"
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        await private_reply(ctx, "❌ Event kanal nije pronađen.")
+        return
+    await channel.send(f"🏆 **Podsjetnik — zadnji pobjednik Ammo Cara:** {winner_mention} 🚗💨")
+    await private_reply(ctx, f"✅ Pobjednik ponovo objavljen: {winner_mention}")
+
+
+@bot.command(name="clearwinner")
+@commands.has_permissions(administrator=True)
+async def clearwinner(ctx):
+    """Resetira zabilježenog pobjednika."""
+    global last_winner_id
+    if last_winner_id is None:
+        await private_reply(ctx, "ℹ️ Nema zabilježenog pobjednika — već je čisto.")
+        return
+    last_winner_id = None
+    await private_reply(ctx, "✅ Zadnji pobjednik resetiran.")
+
+
+@bot.command(name="history")
+@commands.has_permissions(administrator=True)
+async def history(ctx):
+    """Prikazuje zadnjih 5 pobjednika."""
+    if not winner_history:
+        await private_reply(ctx, "ℹ️ Nema zabilježenih pobjednika od kad je bot pokrenut.")
+        return
+    embed = discord.Embed(title="🏆 Zadnjih 5 pobjednika", color=0xFF5500)
+    lines = []
+    for i, entry in enumerate(reversed(winner_history), 1):
+        user = bot.get_user(entry["id"])
+        name = user.display_name if user else f"ID {entry['id']}"
+        lines.append(f"`{i}.` **{name}** — {entry['time']}")
+    embed.description = "\n".join(lines)
+    await private_reply(ctx, embed=embed)
+
+
+@bot.command(name="setup")
+@commands.has_permissions(administrator=True)
+async def setup(ctx):
+    """Prikazuje trenutnu konfiguraciju bota."""
+    channel = bot.get_channel(CHANNEL_ID)
+    channel_val = channel.mention if channel else "❌ Nije postavljen — koristi `!set_channel #kanal`"
+
+    priority_role = None
+    if PRIORITY_ROLE_ID:
+        priority_role = ctx.guild.get_role(PRIORITY_ROLE_ID)
+
+    embed = discord.Embed(
+        title="⚙️ Ammo Car Bot — Konfiguracija",
+        color=0xFF5500
+    )
+    embed.add_field(name="📡 Event kanal", value=channel_val, inline=False)
+    embed.add_field(name="⏰ Raspored", value=(
+        f"Start: `:{str(START_MINUTE).zfill(2)}`\n"
+        f"Izvlačenje: `:{str(DRAW_MINUTE).zfill(2)}`\n"
+        f"Kraj: `:{str(END_MINUTE).zfill(2)}`"
+    ), inline=True)
+    embed.add_field(name="👥 Max slotova", value=f"`{MAX_SLOTS}`", inline=True)
+    embed.add_field(name="⭐ Priority rol", value=priority_role.mention if priority_role else "*nije postavljen*", inline=True)
+    embed.add_field(name="🚛 Event aktivan", value="✅ Da" if event_active else "❌ Ne", inline=True)
+    embed.add_field(name="🚫 Blacklista", value=f"`{len(BLACKLIST_USERS)}` korisnika", inline=True)
+    embed.add_field(name="🔨 Banirani", value=f"`{len(BAN_USERS)}` korisnika", inline=True)
+    embed.set_footer(text="Koristi !helpinf za listu svih komandi.")
+    await private_reply(ctx, embed=embed)
 
 
 @bot.command(name="status")
@@ -808,10 +940,33 @@ async def status(ctx):
 @bot.event
 async def on_ready():
     print(f"✅ LOGGED IN AS {bot.user} (ID: {bot.user.id})")
-    print(f"📡 CHANNEL TARGET: {CHANNEL_ID}")
-    print(f"🚛 AMMO CAR BOT IS RUNNING — WILL START NEXT :{str(START_MINUTE).zfill(2)}")
+    if CHANNEL_ID == 0:
+        print("⚠️  Kanal nije postavljen. Admin treba upisati !set_channel #kanal na serveru.")
+    else:
+        print(f"📡 CHANNEL TARGET: {CHANNEL_ID}")
+        print(f"🚛 BOT AKTIVAN — sljedeći event u :{str(START_MINUTE).zfill(2)}")
     bot.add_view(JoinButtonView())
     event_scheduler.start()
+
+
+@bot.event
+async def on_guild_join(guild):
+    for channel in guild.text_channels:
+        if channel.permissions_for(guild.me).send_messages:
+            embed = discord.Embed(
+                title="🚛 Ammo Car Bot — Setup",
+                description=(
+                    "Hvala što si me dodao/la! Koristi sljedeće admin komande za postavljanje:\n\n"
+                    f"**1.** `!set_channel #kanal` — odaberi kanal za events\n"
+                    f"**2.** `!set_time 25 40` — postavi minute starta i kraja\n"
+                    f"**3.** `!set_draw 35` — postavi minutu izvlačenja\n\n"
+                    f"Nakon toga bot automatski pokreće event svaki sat.\n"
+                    f"Upiši `!helpinf` za sve komande."
+                ),
+                color=0xFF5500
+            )
+            await channel.send(embed=embed)
+            break
 
 
 # ==========================================
@@ -820,7 +975,5 @@ async def on_ready():
 if __name__ == "__main__":
     if not TOKEN:
         print("❌ ERROR: DISCORD_TOKEN secret is not set!")
-    elif CHANNEL_ID == 0:
-        print("❌ ERROR: CHANNEL_ID environment variable is not set!")
     else:
         bot.run(TOKEN)
