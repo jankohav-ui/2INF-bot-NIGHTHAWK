@@ -64,7 +64,6 @@ TIMEZONE = pytz.timezone('Europe/Zagreb')
 # ==========================================
 # INTERNAL STATE
 # ==========================================
-PRIORITY_ROLE_ID = None
 last_winner_id = None
 winner_history = []
 current_participants = []
