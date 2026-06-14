@@ -874,9 +874,11 @@ async def setup(ctx):
     channel = bot.get_channel(CHANNEL_ID)
     channel_val = channel.mention if channel else "❌ Nije postavljen — koristi `!set_channel #kanal`"
 
-    priority_role = None
     if PRIORITY_ROLE_ID:
         priority_role = ctx.guild.get_role(PRIORITY_ROLE_ID)
+        priority_val = priority_role.mention if priority_role else f"<@&{PRIORITY_ROLE_ID}>"
+    else:
+        priority_val = "*nije postavljen*"
 
     embed = discord.Embed(
         title="⚙️ Ammo Car Bot — Konfiguracija",
@@ -889,7 +891,7 @@ async def setup(ctx):
         f"Kraj: `:{str(END_MINUTE).zfill(2)}`"
     ), inline=True)
     embed.add_field(name="👥 Max slotova", value=f"`{MAX_SLOTS}`", inline=True)
-    embed.add_field(name="⭐ Priority rol", value=priority_role.mention if priority_role else "*nije postavljen*", inline=True)
+    embed.add_field(name="⭐ Priority rol", value=priority_val, inline=True)
     embed.add_field(name="🚛 Event aktivan", value="✅ Da" if event_active else "❌ Ne", inline=True)
     embed.add_field(name="🚫 Blacklista", value=f"`{len(BLACKLIST_USERS)}` korisnika", inline=True)
     embed.add_field(name="🔨 Banirani", value=f"`{len(BAN_USERS)}` korisnika", inline=True)
