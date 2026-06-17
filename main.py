@@ -70,6 +70,7 @@ current_participants = []
 event_active = False
 join_button_locked = False
 current_event_message = None
+inf_bot_online = None
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -401,6 +402,51 @@ async def remind(ctx):
     await private_reply(ctx, "✅ Podsjetnik poslan.")
 
 
+@bot.command(name="infon")
+@commands.has_permissions(administrator=True)
+async def infon(ctx):
+    global inf_bot_online
+    inf_bot_online = True
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.NotFound):
+        pass
+    channel = bot.get_channel(CHANNEL_ID)
+    target = channel if channel else ctx.channel
+    await target.send("INF bot uključen budite spremni.")
+
+
+@bot.command(name="infof")
+@commands.has_permissions(administrator=True)
+async def infof(ctx):
+    global inf_bot_online
+    inf_bot_online = False
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.NotFound):
+        pass
+    channel = bot.get_channel(CHANNEL_ID)
+    target = channel if channel else ctx.channel
+    await target.send("Nažalost izgubili smo neformalnu bot neradi dok ne dobijemo neformalnu nazad")
+
+
+@bot.command(name="infostatus")
+@commands.has_permissions(administrator=True)
+async def infostatus(ctx):
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.NotFound):
+        pass
+    channel = bot.get_channel(CHANNEL_ID)
+    target = channel if channel else ctx.channel
+    if inf_bot_online is True:
+        await target.send("✅ **INF bot status:** Uključen — budite spremni.")
+    elif inf_bot_online is False:
+        await target.send("❌ **INF bot status:** Isključen — nema neformalne dok ne dobijemo nazad.")
+    else:
+        await target.send("❓ **INF bot status:** Status još nije postavljen. Koristi `!infon` ili `!infof`.")
+
+
 @bot.command(name="reroll")
 @commands.has_permissions(administrator=True)
 async def reroll(ctx):
@@ -729,6 +775,9 @@ async def help_command(ctx):
     embed.add_field(name="!clearwinner", value="Resetira zabilježenog pobjednika.", inline=False)
     embed.add_field(name="!history", value="Prikazuje zadnjih 5 pobjednika s vremenima.", inline=False)
     embed.add_field(name="!remind", value="Ručno šalje podsjetnik u event kanal da lista uskoro počinje.", inline=False)
+    embed.add_field(name="!infon", value="Bot piše u kanal: **INF bot uključen budite spremni.**", inline=False)
+    embed.add_field(name="!infof", value="Bot piše u kanal: **Nažalost izgubili smo neformalnu bot neradi dok ne dobijemo neformalnu nazad**", inline=False)
+    embed.add_field(name="!infostatus", value="Prikazuje trenutni status bota u kanalu — uključen, isključen ili nije još postavljen.", inline=False)
     embed.add_field(name="!ping", value="Provjeri radi li bot i kolika mu je latencija. *(svi mogu koristiti)*", inline=False)
     embed.add_field(name="!status", value="Pokazuje stanje eventa — koliko je ljudi ušlo i kada kreće sljedeći.", inline=False)
     embed.add_field(name="!add @korisnik", value="Dodaj korisnika na listu dok je event aktivan. *(svi mogu koristiti)*", inline=False)
